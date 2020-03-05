@@ -1,6 +1,9 @@
 import requests
 import numpy as np
 import h5py
+from astropy.io import fits
+import os
+import errno
 import changeUnits
 
 baseUrl = 'http://www.illustris-project.org/api/'
@@ -51,6 +54,10 @@ def get(path, params=None, fName='temp'): # gets data from url, saves to file
 
     if r.headers['content-type'] == 'application/json':
         return r.json() # parse json responses automatically
+    
+    # images (.fits)
+    if r.headers['content-type'] == 'application/octet-stream':
+        return r.content    
 
     dataFile=fName+'.hdf5'
     # Saves to file, currently disabled
@@ -615,3 +622,106 @@ def getSimData(simulation='Illustris-1', getRedshifts=1):
             snapshots[thisSnap,3]=integrate.quad(tInt,0,a)[0] #NOT THE SAME AS ON THE ILLUSTRIS WEBSITE (no idea why not tho...)
         data['Redshifts']=snapshots
     return data
+
+def GetImages(whichSubhalo, simulation='Illustris-1', snapshot=135):
+    """
+    Downloads .fits files available for specific subhalos
+    it will download both the broadband.fits and
+    broadband_red.fits
+    
+    the .fits files are saved in an /images subfolder, because
+    parsing creates 18 files
+    
+    This is currently only available in Illustris-1
+    
+    .fits files have to be parsed after download
+        
+    Parameters
+    ----------
+    whichSubhalo : int
+        halo/subhalo number of the galaxy you wish to get data for
+            
+    simulation : str
+        Which simulation to pull data from
+
+    snapshot : int
+        Which snapshot (moment in time) to pull data from
+        
+        
+    Returns
+    -------
+    filename : str
+        .fits filename
+        
+    filename_r : str
+        .fits filename red
+        
+    """    
+    
+    imgUrl='http://www.illustris-project.org/api/'+simulation+'/snapshots/'+str(snapshot)+'/subhalos/'+str(whichSubhalo)+'/stellar_mocks/broadband.fits'
+    try:
+        imgData=get(imgUrl)
+    except requests.exceptions.HTTPError as e: 
+        print('no image for id ' + str(whichSubhalo))
+        print(e)
+        return None, None
+    filename = 'images/' + str(whichSubhalo) + '.fits'
+    
+    if not os.path.exists(os.path.dirname(filename)):
+        try:
+            os.makedirs(os.path.dirname(filename))
+        except OSError as exc: # Guard against race condition
+            if exc.errno != errno.EEXIST:
+                raise
+    
+    img = open(filename, 'wb')
+    img.write(imgData)
+    img.close()
+    
+    imgUrl='http://www.illustris-project.org/api/'+simulation+'/snapshots/'+str(snapshot)+'/subhalos/'+str(whichSubhalo)+'/stellar_mocks/broadband_red.fits'
+    try:
+        imgData=get(imgUrl)  
+    except requests.exceptions.HTTPError as e: 
+        print('no red image for id ' + str(whichSubhalo))
+        print(e)
+        return filename, None
+    filename_r = 'images/' + str(whichSubhalo) + '_red.fits'
+    img_r = open(filename_r, 'wb')
+    img_r.write(imgData)
+    img_r.close()
+    
+    return filename, filename_r
+    
+def ParseImage(filename):
+    """
+    Parses .fits files available for specific subhalos
+    
+    filenames contain 'img' for images and 'tab' for tables
+    
+    https://www.illustris-project.org/data/docs/specifications/#sec4a
+        
+    Parameters
+    ----------
+    filename : str
+        .fits filename of image to be parsed
+        
+        
+    Returns
+    -------
+        
+    """
+    try:   
+        hdul = fits.open(filename)
+    except ValueError as ve:
+        print(ve)
+        print('could not parse image')
+        return
+    praef = filename[:-5]
+    
+    for i in range(len(hdul)):
+        if isinstance(hdul[i], fits.ImageHDU):
+            fits.PrimaryHDU(hdul[i].data, header=hdul[i].header).writeto(praef + '_img_{0}.fits'.format(i), overwrite=True)
+        elif isinstance(hdul[i], fits.BinTableHDU):
+            outhdu = fits.HDUList([fits.PrimaryHDU(), hdul[i]])
+            outhdu.writeto(praef + '_tab_{0}.fits'.format(i), overwrite=True)
+
