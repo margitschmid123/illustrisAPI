@@ -55,17 +55,20 @@ def get(path, params=None, fName='temp'): # gets data from url, saves to file
     if r.headers['content-type'] == 'application/json':
         return r.json() # parse json responses automatically
     
-    # images (.fits)
-    if r.headers['content-type'] == 'application/octet-stream':
-        return r.content    
-
-    dataFile=fName+'.hdf5'
-    # Saves to file, currently disabled
+    # Saves to file
     if 'content-disposition' in r.headers:
         filename = r.headers['content-disposition'].split("filename=")[1]
-        with open(dataFile, 'wb') as f:
-            f.write(r.content)
-        return dataFile # return the filename string
+        if '.fits' in filename:
+            # images (.fits)
+            if r.headers['content-type'] == 'application/octet-stream':
+                return r.content
+        else:
+            # data (.hdf5)
+            dataFile=fName+'.hdf5'
+            print(dataFile)
+            with open(dataFile, 'wb') as f:
+                f.write(r.content)
+            return dataFile # return the filename string
 
     return r
 
